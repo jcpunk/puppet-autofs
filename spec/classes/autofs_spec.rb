@@ -119,6 +119,32 @@ describe 'autofs', type: :class do
         end
       end
 
+      context 'should declare multi-mount map files' do
+        home_submounts = [
+          { 'mountpoint' => '/', 'fs' => 'home.com:/export/home/&' },
+          { 'mountpoint' => '/archive', 'options' => 'ro', 'fs' => 'archive.com:/export/archive/&', 'order' => 20 },
+        ]
+        let(:params) do
+          {
+            mounts: {},
+            multi_mounts: {
+              '/etc/auto.home' => { key: '*', submounts: home_submounts },
+            },
+            maps: :undef,
+          }
+        end
+
+        it do
+          expect(subject).to compile.with_all_deps
+          expect(subject).to contain_autofs__multi_mount('/etc/auto.home')
+            .with(key: '*', submounts: home_submounts)
+          expect(subject).to have_autofs__submount_resource_count(2)
+          expect(subject).to have_autofs__multi_mount_resource_count(1)
+          expect(subject).to have_autofs__mount_resource_count(0)
+          expect(subject).to have_autofs__map_resource_count(0)
+        end
+      end
+
       context 'should declare automaster mapfile with nismap' do
         master_mappings = [
           { 'key' => '+', 'fs' => 'auto.master' },

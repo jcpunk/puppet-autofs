@@ -24,20 +24,29 @@ points and maps.
 file.
 * [`autofs::mount`](#autofs--mount): Defined type to manage mount point definitions in the Autofs master
 map.
+* [`autofs::multi_mount`](#autofs--multi_mount): Defined type to manage a single multi-mount entry, stored as an
+autofs map file.
+* [`autofs::submount`](#autofs--submount): Defined type to manage a single submount within a multi-mount
+map entry.
+
+### Functions
+
+* [`autofs::format_options`](#autofs--format_options): Format an Autofs::Options value for use in a sun format map entry.
 
 ### Data types
 
 * [`Autofs::Fs_mapping`](#Autofs--Fs_mapping): A type representing a single filesystem mapping, relative to the context provided by an (unspecified) autofs map.  "Single" refers to a singl
 * [`Autofs::Mapentry`](#Autofs--Mapentry): This type matches a map specfication with map type and optional format, or the built-in -hosts map.
 * [`Autofs::Options`](#Autofs--Options): A type representing an autofs options list, represented either as a single non-empty string or an array of such strings
+* [`Autofs::Submount_mapping`](#Autofs--Submount_mapping): A type representing a single submount within a multi-mount map entry: the mountpoint at which one filesystem is mounted relative to the multi
 
 ## Classes
 
 ### <a name="autofs"></a>`autofs`
 
 Autofs mount points and their corresponding maps can also be
-managed via separate autofs::mount, autofs::mapfile, and
-autofs::mapping resources.
+managed via separate autofs::mount, autofs::mapfile,
+autofs::multi_mount, and autofs::mapping resources.
 
 To use this module, simply declare it in your manifest.
 The module now supports the ability to not only enable autofs,
@@ -106,6 +115,7 @@ The following parameters are available in the `autofs` class:
 * [`service_options`](#-autofs--service_options)
 * [`service_conf_options`](#-autofs--service_conf_options)
 * [`mapfiles`](#-autofs--mapfiles)
+* [`multi_mounts`](#-autofs--multi_mounts)
 * [`maps`](#-autofs--maps)
 * [`package_ensure`](#-autofs--package_ensure)
 * [`package_name`](#-autofs--package_name)
@@ -186,6 +196,15 @@ Default value: `undef`
 Data type: `Optional[Hash[String, Hash]]`
 
 replace: whether to modify the map file if it already exists
+
+Default value: `undef`
+
+##### <a name="-autofs--multi_mounts"></a>`multi_mounts`
+
+Data type: `Optional[Hash[String, Hash]]`
+
+map files, keyed by path, containing a single
+multi-mount entry; values are passed to autofs::multi_mount
 
 Default value: `undef`
 
@@ -755,6 +774,256 @@ map.  Irrelevant when $use_dir is true.
 
 Default value: `1`
 
+### <a name="autofs--multi_mount"></a>`autofs::multi_mount`
+
+A multi-mount is a single map entry whose map field specifies multiple
+filesystems, mounted together under one key: a single lookup of the key
+mounts every filesystem of the entry at once.  The map file consists of a
+root line holding the entry key (optionally followed by map-wide
+options), and one or more continuation lines, each contributed by an
+autofs::submount resource targeting this map file.  Continuation lines
+are ordered numerically; orders 0 and 999999 are reserved for the root
+line and the map file's terminating line respectively.
+
+This resource implements Autofs's 'sun' map format, which is the default.
+
+Based on the original multi-mount work contributed by Chip Schweiss in
+https://github.com/voxpupuli/puppet-autofs/pull/164
+
+* **See also**
+  * https://voxpupuli.org/puppet-autofs
+    * Home
+  * https://voxpupuli.org/puppet-autofs/puppet_classes/autofs.html
+    * puppet_classes::autofs
+  * https://www.github.com/voxpupuli/puppet-autofs
+    * Github
+  * https://forge.puppet.com/puppet/autofs
+    * Puppet Forge
+  * autofs(5)
+    * man page, section "Multiple Mounts"
+
+#### Examples
+
+##### Per-user homes with per-user subdirectories from other servers
+
+```puppet
+autofs::multi_mount { '/etc/auto.home':
+  key       => '*',
+  submounts => [
+    { 'mountpoint' => '/',        'fs' => 'homefs.example.com:/export/home/&' },
+    { 'mountpoint' => '/archive', 'options' => 'ro', 'fs' => 'archivefs.example.com:/export/archive/&' },
+  ],
+}
+```
+
+#### Parameters
+
+The following parameters are available in the `autofs::multi_mount` defined type:
+
+* [`key`](#-autofs--multi_mount--key)
+* [`ensure`](#-autofs--multi_mount--ensure)
+* [`path`](#-autofs--multi_mount--path)
+* [`submounts`](#-autofs--multi_mount--submounts)
+* [`options`](#-autofs--multi_mount--options)
+* [`replace`](#-autofs--multi_mount--replace)
+* [`execute`](#-autofs--multi_mount--execute)
+
+##### <a name="-autofs--multi_mount--key"></a>`key`
+
+Data type: `Pattern[/\A\S+\z/]`
+
+the autofs map key that roots the multi-mount; every submount
+of the entry is mounted at or below this key.  For an indirect map
+(e.g. a per-user map for /home) this is typically a name or the
+wildcard '*'; for a direct map it is a path.
+
+##### <a name="-autofs--multi_mount--ensure"></a>`ensure`
+
+Data type: `Enum['present', 'absent']`
+
+Whether the mapfile should be present on the target system
+
+Default value: `'present'`
+
+##### <a name="-autofs--multi_mount--path"></a>`path`
+
+Data type: `Stdlib::Absolutepath`
+
+An absolute path to the map file
+
+Default value: `$title`
+
+##### <a name="-autofs--multi_mount--submounts"></a>`submounts`
+
+Data type: `Array[Autofs::Submount_mapping]`
+
+an array of submounts to enroll in the file.  Additional
+submounts can be specified for this mapfile via autofs::submount
+resources
+
+Default value: `[]`
+
+##### <a name="-autofs--multi_mount--options"></a>`options`
+
+Data type: `Optional[Autofs::Options]`
+
+default (map-wide) mount options for the entry; per-submount
+options are appended to these.  A comma-delimited mount options string
+or an array of individual mount options; neither individual options nor
+the overall option list should be specified with a leading hyphen (-)
+
+Default value: `undef`
+
+##### <a name="-autofs--multi_mount--replace"></a>`replace`
+
+Data type: `Boolean`
+
+Whether to replace the contents of any an existing file
+at the specified path
+
+Default value: `true`
+
+##### <a name="-autofs--multi_mount--execute"></a>`execute`
+
+Data type: `Boolean`
+
+Whether to make the mapfile executable or not
+
+Default value: `false`
+
+### <a name="autofs--submount"></a>`autofs::submount`
+
+When ensured 'present', an autofs::multi_mount resource managing the
+overall target map file must also be present in the catalog.  The submount
+is rendered as an indented, backslash-continued line of that file; the
+multi-mount entry itself is closed by the map file's terminating line.
+This resource implements Autofs's 'sun' map format, which is the default.
+
+It is not supported to declare multiple autofs::submounts with the
+same mountpoint, targeting the same map file, and ensured 'present'.
+
+Based on the original multi-mount work contributed by Chip Schweiss in
+https://github.com/voxpupuli/puppet-autofs/pull/164
+
+* **See also**
+  * https://voxpupuli.org/puppet-autofs
+    * Home
+  * https://voxpupuli.org/puppet-autofs/puppet_classes/autofs.html
+    * puppet_classes::autofs
+  * https://www.github.com/voxpupuli/puppet-autofs
+    * Github
+  * https://forge.puppet.com/puppet/autofs
+    * Puppet Forge
+  * autofs(5)
+    * man page, section "Multiple Mounts"
+
+#### Examples
+
+##### A read-only archive submount within a per-user home multi-mount
+
+```puppet
+autofs::submount { '/etc/auto.home:/archive':
+  mapfile    => '/etc/auto.home',
+  mountpoint => '/archive',
+  options    => 'ro',
+  fs         => 'archivefs.example.com:/export/archive/&'
+}
+```
+
+#### Parameters
+
+The following parameters are available in the `autofs::submount` defined type:
+
+* [`ensure`](#-autofs--submount--ensure)
+* [`fs`](#-autofs--submount--fs)
+* [`mountpoint`](#-autofs--submount--mountpoint)
+* [`mapfile`](#-autofs--submount--mapfile)
+* [`options`](#-autofs--submount--options)
+* [`order`](#-autofs--submount--order)
+
+##### <a name="-autofs--submount--ensure"></a>`ensure`
+
+Data type: `Enum['present', 'absent']`
+
+Whether the submount should be present in the target
+mapfile; ensuring 'absent' is not meaningfully different from omitting
+the resource declaration altogether
+
+Default value: `'present'`
+
+##### <a name="-autofs--submount--fs"></a>`fs`
+
+Data type: `Variant[String[1], Array[String[1]]]`
+
+the remote filesystem to mount
+
+##### <a name="-autofs--submount--mountpoint"></a>`mountpoint`
+
+Data type: `Pattern[/\A\S+\z/]`
+
+where this filesystem is mounted within the
+multi-mount, relative to the multi-mount's key; '/' refers to the key
+itself
+
+##### <a name="-autofs--submount--mapfile"></a>`mapfile`
+
+Data type: `Stdlib::Absolutepath`
+
+the absolute path to the file containing the multi-mount
+map to which this submount belongs
+
+##### <a name="-autofs--submount--options"></a>`options`
+
+Data type: `Optional[Autofs::Options]`
+
+a comma-delimited mount options string or an array of
+individual mount options; these are appended to the multi-mount's
+default options; neither individual options nor the overall option
+list should be specified with a leading hyphen (-); that is part of
+the map file format, not of the options themselves, and it is
+provided by this resource
+
+Default value: `undef`
+
+##### <a name="-autofs--submount--order"></a>`order`
+
+Data type: `Integer[1, 999998]`
+
+an integer describing the relative order of the submount
+represented by this resource within the target map file (default 10).
+Orders 0 and 999999 are reserved for the multi-mount root line and
+the map file's terminating line respectively.
+
+Default value: `10`
+
+## Functions
+
+### <a name="autofs--format_options"></a>`autofs::format_options`
+
+Type: Puppet Language
+
+Accepts undef, an empty array, a single non-empty options string, or an
+array of such strings, and returns a leading-hyphen options string
+suitable for inclusion in a sun format map entry.  The hyphen is part of
+the map file format, not of the options themselves, so it is supplied
+here.
+
+#### `autofs::format_options(Optional[Autofs::Options] $options)`
+
+Accepts undef, an empty array, a single non-empty options string, or an
+array of such strings, and returns a leading-hyphen options string
+suitable for inclusion in a sun format map entry.  The hyphen is part of
+the map file format, not of the options themselves, so it is supplied
+here.
+
+Returns: `String` the formatted options string, possibly empty
+
+##### `options`
+
+Data type: `Optional[Autofs::Options]`
+
+the options to format
+
 ## Data types
 
 ### <a name="Autofs--Fs_mapping"></a>`Autofs::Fs_mapping`
@@ -845,3 +1114,33 @@ non-empty string or an array of such strings
 
 Alias of `Variant[Pattern[/\A\S+\z/], Array[Pattern[/\A\S+\z/]]]`
 
+### <a name="Autofs--Submount_mapping"></a>`Autofs::Submount_mapping`
+
+A type representing a single submount within a multi-mount map entry:
+the mountpoint at which one filesystem is mounted relative to the
+multi-mount's key, the filesystem itself, and optional per-mount options
+and ordering.  The "_mapping" suffix mirrors Autofs::Fs_mapping (data for
+an autofs::mapping resource); a bare Autofs::Submount would collide with
+the resource type of the autofs::submount defined type.  The mountpoint
+is restricted to a non-blank string since it appears within a
+backslash-continued multi-mount line, and the order to values between the
+reserved first (0) and last (999999) lines of a multi-mount map file.
+
+#### Examples
+
+##### Typical submount within a multi-mount entry
+
+```puppet
+{ 'mountpoint' => '/data', 'options' => 'ro', 'fs' => 'data.com:/export/data' }
+```
+
+Alias of
+
+```puppet
+Struct[{
+    mountpoint => Pattern[/\A\S+\z/],
+    options    => Optional[Autofs::Options],
+    order      => Optional[Integer[1, 999998]],
+    fs         => Variant[String[1], Array[String[1]]],
+  }]
+```

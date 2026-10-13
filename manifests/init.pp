@@ -2,8 +2,8 @@
 #   points and maps.
 #
 # Autofs mount points and their corresponding maps can also be
-# managed via separate autofs::mount, autofs::mapfile, and
-# autofs::mapping resources.
+# managed via separate autofs::mount, autofs::mapfile,
+# autofs::multi_mount, and autofs::mapping resources.
 #
 # @see https://voxpupuli.org/puppet-autofs Home
 # @see https://www.github.com/voxpupuli/puppet-autofs Github
@@ -52,6 +52,8 @@
 # @param service_options An array of options to add to the OPTIONS variable in the service configuration file
 # @param service_conf_options A hash of environment variables to add to the service configuration file for LDAP configuration
 # @param mapfiles replace: whether to modify the map file if it already exists
+# @param multi_mounts map files, keyed by path, containing a single
+#   multi-mount entry; values are passed to autofs::multi_mount
 # @param maps Deprecated.  Use the mapfiles parameter instead.
 # @param package_ensure Determines the state of the package. Can be set to: installed, absent, lastest, or a specific version string.
 # @param package_name Determine the name of the package to install. Should be covered by hieradata.
@@ -91,6 +93,7 @@ class autofs (
   Hash $ldap_auth_config = { 'usetls' => 'no', 'tlsrequired' => 'no', 'authrequired' => 'no' },
   Stdlib::Absolutepath $service_conf_path = '/etc/sysconfig/autofs',
   Optional[Hash[String, Hash]] $mapfiles = undef,
+  Optional[Hash[String, Hash]] $multi_mounts = undef,
   Optional[Hash[String, Hash]] $maps = undef,  # deprecated
   Optional[String] $package_source = undef,
   Optional[String] $reload_command = undef,
@@ -113,6 +116,12 @@ class autofs (
   if $mapfiles =~ NotUndef {
     $mapfiles.each |String $file, Hash $attributes| {
       autofs::mapfile { $file: * => $attributes }
+    }
+  }
+
+  if $multi_mounts =~ NotUndef {
+    $multi_mounts.each |String $file, Hash $attributes| {
+      autofs::multi_mount { $file: * => $attributes }
     }
   }
 

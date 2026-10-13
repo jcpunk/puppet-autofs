@@ -328,6 +328,92 @@ dataA -ro remote.com:/exports/dataA
 dataB -rw,noexec remote.com:/exports/dataB
 ```
 
+#### Multi-mount map files
+
+A standard map entry mounts one filesystem per key.  Autofs permits a
+single entry to mount several filesystems as a unit -- a *multi-mount*
+(see the "Multiple Mounts" section of the autofs(5) man page) -- where one
+lookup of the key mounts the entire set at once, each filesystem at its own
+mountpoint, with per-mountpoint options appended to the entry's default
+options.
+
+This is useful wherever a directory tree is stitched together from more
+than one server and the pieces must appear, disappear, and carry options
+consistently.  For example, user homes may live on a primary file server
+while each user's archive volume should automount read-only from the
+archive server inside the home: a single wildcard multi-mount entry on
+`/home` accomplishes that with one lookup, no static mounts, and no mount
+ordering hacks (add `-strict` to the entry options if mounts should be
+all-or-nothing):
+
+```puppet
+autofs::multi_mount { '/etc/auto.home':
+  key       => '*',
+  options   => 'nfsvers=4',
+  submounts => [
+    { 'mountpoint' => '/',        'fs' => 'homefs.example.com:/export/home/&' },
+    { 'mountpoint' => '/scratch', 'fs' => 'scratchfs.example.com:/export/scratch/&' },
+    { 'mountpoint' => '/archive', 'options' => 'ro', 'fs' => 'archivefs.example.com:/export/archive/&' },
+  ],
+}
+```
+
+With a master map entry `/home /etc/auto.home` (an `autofs::mount`), the
+first access to `/home/jane` mounts, as a unit:
+
+* `/home/jane` from `homefs.example.com:/export/home/jane`
+* `/home/jane/scratch` from `scratchfs.example.com:/export/scratch/jane`
+* `/home/jane/archive` read-only from `archivefs.example.com:/export/archive/jane`
+
+The `key` is the autofs map key rooting the entry (the wildcard `*` above
+makes every username a multi-mount); each submount's `mountpoint` is
+relative to that key, and `/` refers to the key's own root, which is why
+the home filesystem itself is mounted there.  The `&` key substitution
+works in submount locations just as it does for ordinary mappings.  The
+resulting content of `/etc/auto.home` is a single backslash-continued
+entry:
+
+```sh
+* -nfsvers=4 \
+  /         homefs.example.com:/export/home/& \
+  /scratch  scratchfs.example.com:/export/scratch/& \
+  /archive  -ro archivefs.example.com:/export/archive/& \
+```
+
+Submounts may also be declared as independent `autofs::submount`
+resources, the same way `autofs::mapping` resources augment a map file:
+
+```puppet
+autofs::submount { '/etc/auto.home:/backup':
+  mapfile    => '/etc/auto.home',
+  mountpoint => '/backup',
+  options    => 'ro',
+  fs         => 'backupfs.example.com:/export/backup/&',
+}
+```
+
+The external-data form uses the `multi_mounts` parameter of the `autofs`
+class:
+
+```yaml
+autofs::multi_mounts:
+  /etc/auto.home:
+    key: '*'
+    options: 'nfsvers=4'
+    submounts:
+      - mountpoint: '/'
+        fs: 'homefs.example.com:/export/home/&'
+      - mountpoint: '/archive'
+        options: 'ro'
+        fs: 'archivefs.example.com:/export/archive/&'
+```
+
+Note that only one multi-mount entry is supported per map file, and that
+submounts are ordered numerically within it (unlike the default ordering
+of standard map files): orders 0 and 999999 are reserved for the root line
+and the entry's terminating line, so submounts should use intermediate
+values (default 10).
+
 #### Removing Entries
 
 To remove entries from a managed `mapfile` simply remove the element
