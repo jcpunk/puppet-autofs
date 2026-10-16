@@ -78,10 +78,15 @@ default settings:
 include autofs
 ```
 
-That alone changes nothing major on a clean system. To actually get a mount you
-need **two** resources: one that declares the *automount point* in the master map,
-and one that declares the *map file* content. Here is a complete, self-contained
-example that mounts a network share for every user under `/home`:
+That installs the service, replaces `auto.master`, gets it running.
+
+To actually get a mount you need **two** resources:
+
+* one that declares the *automount point* in the master map
+* one that declares the *map file* content
+
+Here is a complete, self-contained example that mounts a network
+share for every user under `/home`:
 
 ```puppet
 class { 'autofs': }
@@ -277,7 +282,7 @@ starts the service. The most commonly used parameters are:
 | `default_map_dir` | `/etc/auto.master.d` | Drop-in directory. |
 | `map_file_owner` / `map_file_group` / `map_file_mode` | `root` / `root` / `0644` | Default ownership/mode for managed files. |
 | `map_dir_mode` | `0755` | Mode for the drop-in directory. |
-| `purge_map_dir` | `false` | Remove unmanaged files from the drop-in directory. |
+| `purge_map_dir` | `false` | Default of the purge and recurse attributes managing the drop-in directory. When true, unmanaged files in it are removed. |
 | `mounts` | `{}` | Hash of `autofs::mount` entries (see section 8). |
 | `mapfiles` | `{}` | Hash of `autofs::mapfile` entries (see section 8). |
 
@@ -475,7 +480,7 @@ autofs::mapping { '/mnt/data_dataA':
 **Hiera:**
 
 ```yaml
-autofs::mapping:
+autofs::mappings:
   '/mnt/data_dataA':
     mapfile: '/mnt/data'
     key: 'dataA'
@@ -525,7 +530,7 @@ autofs::add_master_entry { 'nis_maps':
 **Hiera:**
 
 ```yaml
-autofs::add_master_entry:
+autofs::add_master_entries:
   '+dir:/etc/auto.master.d/myapp':
     ensure_dir: true
   nis_maps:
@@ -588,7 +593,7 @@ autofs::mounts:
     mount: '/net'
     mapfile: '-hosts'
     use_dir: true
-autofs::add_master_entry:
+autofs::add_master_entries:
   '+auto.master':
     entry: '+auto.master'
 ```
@@ -747,9 +752,10 @@ not manage (see above).
 ### Purging unmanaged drop-in files
 
 By default, files already present in the drop-in directory that Puppet does not
-manage are left alone. Set `purge_map_dir => true` to remove such leftovers,
-keeping the directory strictly mirrored to the declared `autofs::mount`
-resources.
+manage are left alone. Setting `purge_map_dir => true` makes it the default of
+the purge and recurse attributes that `autofs::mapdir` applies to each drop-in
+directory (those created for `+dir:` entries via `use_dir` or `ensure_dir`), so
+that files present but not declared elsewhere in the catalog are removed.
 
 ### Direct maps
 
