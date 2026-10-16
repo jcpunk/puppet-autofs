@@ -61,6 +61,7 @@ describe 'autofs', type: :class do
           it { is_expected.to contain_service(service_value).with_ensure('running') }
         end
         it { is_expected.to contain_service(service_value).with_enable(true) }
+        it { is_expected.to contain_concat(master_map_file_value) }
         it { is_expected.not_to contain_file('autofs_service_config') }
         it { is_expected.not_to contain_file('autofs_ldap_auth_config') }
       end
@@ -177,6 +178,80 @@ describe 'autofs', type: :class do
           expect(subject).to contain_concat__fragment('autofs::mapping//etc/auto.data:example3')
             .with(target: '/etc/auto.data')
           expect(subject).to contain_concat('/etc/auto.data')
+        end
+      end
+
+      context 'should declare mappings via the mappings parameter' do
+        let(:params) do
+          {
+            mounts: {},
+            # The referenced mapfile is declared too, so the fragment has a
+            # valid Concat target -- as the README requires.
+            mapfiles: {
+              '/mnt/data' => {
+                mappings: [
+                  { 'key' => 'viaMapfile', 'options' => 'ro', 'fs' => 'fs.net:/export/viaMapfile' },
+                ],
+              },
+            },
+            mappings: {
+              'dataA' => { mapfile: '/mnt/data', key: 'dataA', options: 'ro', fs: 'remote.com:/exports/dataA' },
+              'dataB' => { mapfile: '/mnt/data', key: 'dataB', options: 'rw', fs: 'remote.com:/exports/dataB' },
+            },
+          }
+        end
+
+        it do
+          expect(subject).to compile.with_all_deps
+          # one mapping from the mapfile plus two from the mappings parameter
+          expect(subject).to have_autofs__mapping_resource_count(3)
+          expect(subject).to contain_autofs__mapping('dataA')
+            .with(mapfile: '/mnt/data', key: 'dataA', options: 'ro', fs: 'remote.com:/exports/dataA')
+          expect(subject).to contain_autofs__mapping('dataB')
+            .with(mapfile: '/mnt/data', key: 'dataB', options: 'rw', fs: 'remote.com:/exports/dataB')
+          expect(subject).to contain_concat__fragment('autofs::mapping/dataA')
+            .with_target('/mnt/data')
+            .with_content(%r{\A\s*dataA\s+-ro\s+remote\.com:/exports/dataA\s*\z})
+          expect(subject).to contain_concat__fragment('autofs::mapping/dataB')
+            .with_target('/mnt/data')
+            .with_content(%r{\A\s*dataB\s+-rw\s+remote\.com:/exports/dataB\s*\z})
+          # The shared mapfile's Concat is created by its mapfile resource.
+          expect(subject).to contain_concat('/mnt/data')
+            .with(owner: 'root', group: group_value, mode: '0644')
+        end
+      end
+
+      context 'should declare master-map entries via the add_master_entries parameter' do
+        let(:params) do
+          {
+            mounts: {},
+            add_master_entries: {
+              'myapp' => { entry: '+dir:/etc/auto.master.d/myapp', ensure_dir: true },
+              'nis_maps' => { entry: '+auto.master' },
+            },
+          }
+        end
+
+        it do
+          expect(subject).to compile.with_all_deps
+          expect(subject).to have_autofs__add_master_entry_resource_count(2)
+          expect(subject).to contain_autofs__add_master_entry('myapp')
+            .with(ensure: 'present', order: 50, ensure_dir: true)
+            .with_entry('+dir:/etc/auto.master.d/myapp')
+          expect(subject).to contain_autofs__add_master_entry('nis_maps')
+            .with_entry('+auto.master')
+          # A present +dir: entry with ensure_dir also creates the directory.
+          expect(subject).to contain_autofs__mapdir('myapp')
+            .with_path('/etc/auto.master.d/myapp')
+          expect(subject).to contain_concat__fragment('autofs::add_master_entry myapp')
+            .with_target(master_map_file_value)
+            .with_content(%r{\A\+dir:/etc/auto\.master\.d/myapp\s*\z})
+            .that_requires('Autofs::Mapdir[myapp]')
+          expect(subject).to contain_concat__fragment('autofs::add_master_entry nis_maps')
+            .with_target(master_map_file_value)
+            .with_content(%r{\A\+auto\.master\s*\z})
+          expect(subject).to contain_concat(master_map_file_value)
+            .with(group: group_value)
         end
       end
 
@@ -342,6 +417,75 @@ describe 'autofs', type: :class do
             .with_content(%r{tlsrequired="yes"})
             .with_content(%r{usetls="yes"})
         }
+      end
+
+      context 'with reload_command set' do
+        let(:params) { { reload_command: '/usr/sbin/automount --remount-all' } }
+
+        it do
+          # reload_command is the documented alternative to a full service
+          # restart: the exec runs refreshonly and only after the service.
+          expect(subject).to compile.with_all_deps
+          expect(subject).to contain_exec('automount-reload')
+            .with_command('/usr/sbin/automount --remount-all')
+            .with_path('/sbin:/usr/sbin')
+            .with_refreshonly(true)
+            .that_requires("Service[#{service_value}]")
+        end
+      end
+
+      context 'with the service stopped and disabled on boot' do
+        # Documented "disable the service" example (README).
+        let(:params) { { service_ensure: 'stopped', service_enable: false } }
+
+        it do
+          expect(subject).to compile.with_all_deps
+          expect(subject).to contain_service(service_value)
+            .with_ensure('stopped')
+            .with_enable(false)
+        end
+      end
+
+      context 'with service_use_misc_device set to no' do
+        let(:params) { { manage_service_config: true, service_use_misc_device: 'no' } }
+
+        it {
+          # README: service_use_misc_device sets USE_MISC_DEVICE in the
+          # service config file.
+          expect(subject).to contain_file('autofs_service_config')
+            .with_content(%r{USE_MISC_DEVICE="no})
+        }
+      end
+
+      context 'with service_options set' do
+        let(:params) { { manage_service_config: true, service_options: %w[--ghost --ghost-permission 0755] } }
+
+        it {
+          # README: service_options is appended to the OPTIONS= line.
+          expect(subject).to contain_file('autofs_service_config')
+            .with_content(%r{OPTIONS="--ghost --ghost-permission 0755})
+        }
+      end
+
+      context 'with purge_map_dir enabled and a use_dir mount' do
+        let(:params) do
+          {
+            purge_map_dir: true,
+            mounts: {
+              'home' => { mount: '/home', mapfile: '/etc/auto.home', use_dir: true, ensure_dir: true },
+            },
+          }
+        end
+
+        it do
+          # The primary documented scenario: autofs::mapdir mirrors (purges)
+          # the drop-in directory from the purge_map_dir default while the
+          # mount's own drop-in file is still declared and so is not purged.
+          expect(subject).to compile.with_all_deps
+          expect(subject).to contain_file('/etc/auto.master.d')
+            .with('purge' => true, 'recurse' => true)
+          expect(subject).to contain_file('/etc/auto.master.d/home.autofs')
+        end
       end
     end
   end
